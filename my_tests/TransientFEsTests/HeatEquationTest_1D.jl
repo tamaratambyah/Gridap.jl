@@ -45,9 +45,14 @@ dt = 0.001
 uh0 = interpolate_everywhere(u(0.0),U(0.0))
 
 ls = LUSolver()
-# ode_solver = EXRungeKutta(ls,dt,:EX_FE_1_0_1)
+ode_solver = EXRungeKutta(ls,dt,:EX_FE_1_0_1)
 # ode_solver = EXRungeKutta(ls,dt,:EX_SSP_3_0_3)
-ode_solver = DIRungeKutta(ls,dt,:BE_1_0_1)
+# ode_solver = DIRungeKutta(ls,dt,:BE_1_0_1)
+
+# Pl = JacobiLinearSolver()
+# cg = GridapSolvers.CGSolver(Pl,rtol=1.e-10,verbose=0)
+# ode_solver = EXRungeKutta(cg,dt,:EX_SSP_3_0_3)
+
 sol_t = solve(ode_solver,op,uh0,t0,tF)
 
 
@@ -68,6 +73,9 @@ for (uh_tn, tn) in sol_t
   ts_rk_fe = [ts_rk_fe; tn]
 end
 
+@time for (uh_tn, tn) in sol_t
+  println(tn)
+end
 
 
 plot(ts_rk_fe,errors_rk_fe)

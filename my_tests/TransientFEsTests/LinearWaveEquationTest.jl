@@ -1,9 +1,11 @@
 using Pkg
-Pkg.add(url="https://github.com/tamaratambyah/Gridap.jl", rev="rungekutta")
+Pkg.add(url="https://github.com/tamaratambyah/Gridap.jl", rev="explicitRK")
+Pkg.add(url="https://github.com/gridap/GridapSolvers.jl", rev="develop")
 
 using Gridap
 using Plots
 using Test
+using GridapSolvers
 
 n = 32
 p = 1
@@ -59,8 +61,12 @@ tF = 1.0
 dt = 0.001
 
 
-ls = LUSolver()
-ode_solver = EXRungeKutta(ls,dt,:EX_SSP_3_0_3)
+# ls = LUSolver()
+# ode_solver = EXRungeKutta(ls,dt,:EX_SSP_3_0_3)
+
+Pl = JacobiLinearSolver()
+cg = GridapSolvers.CGSolver(Pl,rtol=1.e-10,verbose=0)
+ode_solver = EXRungeKutta(cg,dt,:EX_SSP_3_0_3)
 
 sol_t = solve(ode_solver,op,xh0,t0,tF)
 
