@@ -36,10 +36,27 @@ V = TestFESpace(model,
 U = TransientTrialFESpace(V,u)
 
 
+W = TestFESpace(model,
+                ReferenceFE(lagrangian,Float64,1),
+                conformity=:H1)
+R = TransientTrialFESpace(W)
 
-uh0 = interpolate_everywhere(u(0.0),U(0.0))
+# uh0 = interpolate_everywhere(u(0.0),U(0.0))
+# u0 = get_free_dof_values(uh0)
+# K = interpolate_everywhere(k,U(0.0))
+
+q(uu,v) = ∫(uu*v)dΩ
+l(v) = ∫( u(0.0)*v)dΩ
+uop = AffineFEOperator(q,l,U(0.0),V)
+uh0 = solve(uop)
 u0 = get_free_dof_values(uh0)
-K = interpolate_everywhere(k,U(0.0))
+
+q(kk,v) = ∫(kk*v)dΩ
+l(v) = ∫( k*v )dΩ
+kop = AffineFEOperator(q,l,R,W)
+kFE = solve(kop)
+
+println(get_free_dof_values( kFE  )  )
 
 
 function lhs(t,u,v)
@@ -48,10 +65,6 @@ end
 function rhs(t,u,v,k)
   return ∫(v*f(t))dΩ - ∫(( k*∇(v)⊙∇(u) ))dΩ
 end
-# function rhs(t,u,v)
-#   return  ∫( u*v )dΩ
-# end
-
 
 
 ## FE OPERATOR
@@ -78,7 +91,6 @@ struct DAE{C} <: TransientFEOperator{C}
 end
 
 
-
 function EXRKDAE(lhs::Function,rhs::Function,trial,test)
   res(t,u,v) = lhs(t,u,v) - rhs(t,u,v,k)
   jac(t,u,du,v) = ∫(( du*v ))dΩ
@@ -96,17 +108,13 @@ Gridap.ODEs.TransientFETools.get_trial(op::DAE) = op.trials[1]
 import Gridap.ODEs.TransientFETools: get_order
 Gridap.ODEs.TransientFETools.get_order(op::DAE) = op.order
 
-# get_order(op)
-import Gridap.ODEs.TransientFETools: rhs!
-function Gridap.ODEs.TransientFETools.rhs!(
+function DAE_rhs!(
   rhs::AbstractVector,
   op::DAE,
   t::Real,
   xh::T,
-  # yh::T,
+  yh, # this input needs to be FEFunction from projection
   cache) where T
-
-  yh = interpolate_everywhere(k,U(t))
 
   V = get_test(op)
   v = get_fe_basis(V)
@@ -115,20 +123,108 @@ function Gridap.ODEs.TransientFETools.rhs!(
   rhs
 end
 
+import Gridap.ODEs.TransientFETools: ODEOpFromFEOp
+function DAE_rhs!(
+  rhs::AbstractVector,
+  op::ODEOpFromFEOp,
+  t::Real,
+  xhF::Tuple{Vararg{AbstractVector}}, # this input is tuple of dofs
+  yhF::Tuple{Vararg{AbstractVector}}, # this input is tuple of dofs
+  ode_cache)
+  Xh, = ode_cache   # trial space
+  dxh = ()
+  dyh = ()
+  for i in 2:get_order(op)+1
+    dxh = (dxh...,EvaluationFunction(Xh[i],xhF[i]))
+    dyh = (dyh...,EvaluationFunction(R,yhF[i]))  # force trial space for yh
+  end
+  xh=TransientCellField(EvaluationFunction(Xh[1],xhF[1]),dxh)
+  yh=TransientCellField(EvaluationFunction(R,yhF[1]),dyh) # force trial space for yh
 
-import Gridap.ODEs.TransientFETools: residual!
-function Gridap.ODEs.TransientFETools.residual!(
-  b::AbstractVector,
+  DAE_rhs!(rhs,op.feop,t,xh,yh,ode_cache)
+end
+
+
+
+import Gridap.ODEs.TransientFETools: rhs!
+function Gridap.ODEs.TransientFETools.rhs!(
+  rhs::AbstractVector,
   op::DAE,
   t::Real,
   xh::T,
+  yh, # this input needs to be FEFunction from projection
   cache) where T
+
   V = get_test(op)
   v = get_fe_basis(V)
-  vecdata = collect_cell_vector(V,op.res(t,xh,v))
-  assemble_vector!(b,op.assem_t,vecdata)
-  b
+  vecdata = collect_cell_vector(V,op.rhs(t,xh,v,yh))
+  assemble_vector!(rhs,op.assem_t,vecdata)
+  rhs
 end
+
+function Gridap.ODEs.TransientFETools.rhs!(
+  rhs::AbstractVector,
+  op::ODEOpFromFEOp,
+  t::Real,
+  xhF::Tuple{Vararg{AbstractVector}},
+  yh, # this input needs to be FEFunction from projection
+  ode_cache)
+  Xh, = ode_cache
+  dxh = ()
+  for i in 2:get_order(op)+1
+    dxh = (dxh...,EvaluationFunction(Xh[i],xhF[i]))
+  end
+  xh=TransientCellField(EvaluationFunction(Xh[1],xhF[1]),dxh)
+  rhs!(rhs,op.feop,t,xh,yh,ode_cache)
+end
+
+
+
+# ## CHECK - use FE functions, rhs! and DAE_rhs! give same output
+# _rhs = similar(u0)
+# uFE = FEFunction(U(t0),u0)
+
+# DAE_rhs!(_rhs,op,t0,uFE,kFE,nothing)
+# println(_rhs)
+
+# rhs!(_rhs,op,t0,uFE,kFE,nothing)
+# println(_rhs)
+
+# ## CHECK - use DOFs, rhs! and DAE_rhs! give same output
+
+# kk = get_free_dof_values(kFE)
+# xh = (u0,lop.vi)
+# yh = (kk,lop.vi)
+
+# DAE_rhs!(_rhs,odeop,t0,xh,yh,ode_cache)
+# println(_rhs)
+
+# rhs!(_rhs,lop.odeop,t0,xh,kFE,ode_cache)
+# println(_rhs)
+
+
+# Xh, = ode_cache
+# Xh[1]
+# xhF = (lop.u0,lop.vi)
+# dxh = ()
+# dxh = (dxh...,EvaluationFunction(Xh[2],xhF[2]))
+# print(get_free_dof_values(dxh[1]))
+# xh=TransientCellField(EvaluationFunction(Xh[1],xhF[1]),dxh)
+# println( get_free_dof_values(xh.cellfield))
+# println(u0)
+
+# kk = get_free_dof_values(kFE)
+# yhF = (kk,kk)
+# dyh = ()
+# dyh = (dyh...,EvaluationFunction(R,yhF[2]))
+# yh=TransientCellField(EvaluationFunction(R,yhF[1]),dyh)
+# println( get_free_dof_values(yh.cellfield))
+# println( get_free_dof_values( kFE))
+
+# __rhs = similar(u0)
+# DAE_rhs!(__rhs,op,t0,xh,yh,ode_cache)
+# println(__rhs)
+
 
 import Gridap.ODEs.TransientFETools: allocate_residual
 function Gridap.ODEs.TransientFETools.allocate_residual(
@@ -161,19 +257,7 @@ function Gridap.ODEs.TransientFETools.lhs!(
   b
 end
 
-op = EXRKDAE(lhs,rhs,U,V)
 
-
-# _rhs = similar(u0)
-# rhs!(_rhs,op,0.0,uh0,F,nothing)
-
-# _b = similar(u0)
-# lhs!(_b,op,0.0,uh0,nothing)
-
-# _b = similar(u0)
-# residual!(_b,op,0.0,uh0,nothing)
-
-# allocate_residual(op,0.0,uh0,F,nothing)
 
 
 #### jacobians
@@ -277,16 +361,6 @@ function Gridap.ODEs.TransientFETools._matdata_jacobian(
   matdata = collect_cell_matrix(Uh,V,γᵢ*op.jacs[i](t,xh,du,v))
 end
 
-# A = allocate_jacobian(op,0.0,uh0,nothing)
-# jacobian!(A,op,0.0,uh0,1,1,nothing)
-
-# uh = uh0
-# dxh = ()
-#   for i in 1:get_order(op)
-#     dxh = (dxh...,uh)
-#   end
-# xh = TransientCellField(uh,dxh)
-# jacobians!(A,op,0.0,xh,(1,1),nothing)
 
 #####
 
@@ -322,9 +396,16 @@ function Gridap.Algebra.residual!(b::AbstractVector,
    @. ui = ui  + op.dt * op.a[op.i,j] * op.ki[j]
   end
 
+  # yh = get_free_dof_values(kFE)
+  # kkFE = interpolate(k,U(op.ti))
+  q(kk,v) = ∫(kk*v)dΩ
+  l(v) = ∫( k*v )dΩ
+  kop = AffineFEOperator(q,l,R,W)
+  yh = solve(kop)
+
 
   rhs = similar(op.u0)
-  rhs!(rhs,op.odeop,op.ti,(ui,vi),op.ode_cache)
+  DAE_rhs!(rhs,op.odeop,op.ti,(ui,vi),yh,op.ode_cache)
 
   @. b = b + rhs
   @. b = -1.0 * b
@@ -373,25 +454,28 @@ end
 import Gridap.FESpaces: get_algebraic_operator
 import Gridap.ODEs.ODETools: allocate_cache
 
+### EX-RK
+op = EXRKDAE(lhs,rhs,U,V)
+
 a = reshape([0.0],1,1)
 b = [1.0]
 c = [0.0]
-
+ls = LUSolver()
 odeop = get_algebraic_operator(op)
 t0 = 0.0
 dt = 0.001
+
+
 ode_cache = allocate_cache(odeop)
 vi = similar(u0)
-
 ki = [similar(u0)]
 M = allocate_jacobian(op,0.0,uh0,nothing)
 get_mass_matrix!(M,odeop,t0,u0,ode_cache)
+l_cache = nothing
 
 lop = DAERKStageOperator(odeop,t0,dt,u0,ode_cache,vi,ki,0,a,M)
 
 uf = similar(u0)
-ls = LUSolver()
-l_cache = nothing
 
 
 
@@ -413,14 +497,5 @@ println(u_ex)
 println(abs(sum(uf-u_ex)))
 
 # prepare next time iteration
-u0 = copy(u_ex)
+@. u0 = u_ex
 t0 = tf
-ki = [similar(u0)]
-M = allocate_jacobian(op,0.0,uh0,nothing)
-get_mass_matrix!(M,odeop,t0,u0,ode_cache)
-
-lop = DAERKStageOperator(odeop,t0,dt,u0,ode_cache,vi,ki,0,a,M)
-
-uf = similar(u0)
-ls = LUSolver()
-l_cache = nothing
