@@ -8,6 +8,15 @@ using LinearAlgebra
 # using Test
 # using GridapSolvers
 
+# initial condition
+k = 1.0
+
+u(x,t) = x[1]*(1-x[1])*t
+u(t) = x -> u(x,t)
+∂tu = ∂t(u)
+f(t) = x -> ∂t(u)(x,t)-k*Δ(u(t))(x)
+
+
 n = 2
 p = 2
 degree = 4*(p+1)
@@ -24,25 +33,24 @@ V = TestFESpace(model,
                 ReferenceFE(lagrangian,Float64,p),
                 conformity=:H1,
                 dirichlet_tags="boundary")
-g(x,t::Real) = 0.0
-g(t::Real) = x -> g(x,t)
-U = TransientTrialFESpace(V,g)
+U = TransientTrialFESpace(V,u)
 
-# initial condition
 
-u(x,t) = x[1]*(1-x[1])*t
-u(t) = x -> u(x,t)
+
 uh0 = interpolate_everywhere(u(0.0),U(0.0))
+u0 = get_free_dof_values(uh0)
+K = interpolate_everywhere(k,U(0.0))
+
 
 function lhs(t,u,v)
   return ∫( u*v )dΩ
 end
-# function rhs(t,u,v,F)
-#   return  ∫( u*v*F )dΩ
-# end
-function rhs(t,u,v)
-  return  ∫( u*v )dΩ
+function rhs(t,u,v,k)
+  return ∫(v*f(t))dΩ - ∫(( k*∇(v)⊙∇(u) ))dΩ
 end
+# function rhs(t,u,v)
+#   return  ∫( u*v )dΩ
+# end
 
 
 
@@ -72,7 +80,7 @@ end
 
 
 function EXRKDAE(lhs::Function,rhs::Function,trial,test)
-  res(t,u,v) = lhs(t,u,v) - rhs(t,u,v)#,F)
+  res(t,u,v) = lhs(t,u,v) - rhs(t,u,v,k)
   jac(t,u,du,v) = ∫(( du*v ))dΩ
   jac_t(t,u,dut,v) = ∫( dut*v )dΩ
   assem_t = SparseMatrixAssembler(trial,test)
@@ -97,12 +105,16 @@ function Gridap.ODEs.TransientFETools.rhs!(
   xh::T,
   # yh::T,
   cache) where T
+
+  yh = interpolate_everywhere(k,U(t))
+
   V = get_test(op)
   v = get_fe_basis(V)
-  vecdata = collect_cell_vector(V,op.rhs(t,xh,v))
+  vecdata = collect_cell_vector(V,op.rhs(t,xh,v,yh))
   assemble_vector!(rhs,op.assem_t,vecdata)
   rhs
 end
+
 
 import Gridap.ODEs.TransientFETools: residual!
 function Gridap.ODEs.TransientFETools.residual!(
@@ -110,7 +122,6 @@ function Gridap.ODEs.TransientFETools.residual!(
   op::DAE,
   t::Real,
   xh::T,
-  # yh,
   cache) where T
   V = get_test(op)
   v = get_fe_basis(V)
@@ -124,7 +135,6 @@ function Gridap.ODEs.TransientFETools.allocate_residual(
   op::DAE,
   t0::Real,
   uh::T,
-  # yh,
   cache) where T
   V = get_test(op)
   v = get_fe_basis(V)
@@ -152,9 +162,7 @@ function Gridap.ODEs.TransientFETools.lhs!(
 end
 
 op = EXRKDAE(lhs,rhs,U,V)
-u0 = get_free_dof_values(uh0)
 
-# F = interpolate_everywhere(u(0.0),U(0.0))
 
 # _rhs = similar(u0)
 # rhs!(_rhs,op,0.0,uh0,F,nothing)
@@ -163,7 +171,7 @@ u0 = get_free_dof_values(uh0)
 # lhs!(_b,op,0.0,uh0,nothing)
 
 # _b = similar(u0)
-# residual!(_b,op,0.0,uh0,F,nothing)
+# residual!(_b,op,0.0,uh0,nothing)
 
 # allocate_residual(op,0.0,uh0,F,nothing)
 
@@ -300,7 +308,6 @@ mutable struct DAERKStageOperator <: RungeKuttaNonlinearOperator
   M::AbstractMatrix
 end
 
-
 function Gridap.Algebra.residual!(b::AbstractVector,
   op::DAERKStageOperator,
   x::AbstractVector)
@@ -314,6 +321,7 @@ function Gridap.Algebra.residual!(b::AbstractVector,
   for j = 1:op.i-1
    @. ui = ui  + op.dt * op.a[op.i,j] * op.ki[j]
   end
+
 
   rhs = similar(op.u0)
   rhs!(rhs,op.odeop,op.ti,(ui,vi),op.ode_cache)
@@ -365,28 +373,54 @@ end
 import Gridap.FESpaces: get_algebraic_operator
 import Gridap.ODEs.ODETools: allocate_cache
 
+a = reshape([0.0],1,1)
+b = [1.0]
+c = [0.0]
+
 odeop = get_algebraic_operator(op)
 t0 = 0.0
 dt = 0.001
 ode_cache = allocate_cache(odeop)
 vi = similar(u0)
+
 ki = [similar(u0)]
-a = reshape([0.0],1,1)
-b = [1.0]
-c = [0.0]
 M = allocate_jacobian(op,0.0,uh0,nothing)
 get_mass_matrix!(M,odeop,t0,u0,ode_cache)
 
 lop = DAERKStageOperator(odeop,t0,dt,u0,ode_cache,vi,ki,0,a,M)
 
 uf = similar(u0)
-
 ls = LUSolver()
 l_cache = nothing
-i = 1
-ti = t0 + c[i]*dt
-ode_cache = update_cache!(ode_cache,odeop,ti)
-update!(lop,ti,ki[i],i)
-l_cache = solve!(uf,ls,lop,l_cache)
 
-update!(lop,ti,uf,i)
+
+
+i = 1
+  ti = t0 + c[i]*dt
+  ode_cache = update_cache!(ode_cache,odeop,ti)
+  update!(lop,ti,ki[i],i)
+  l_cache = solve!(uf,ls,lop,l_cache)
+  update!(lop,ti,uf,i)
+
+@. uf = u0
+@. uf = uf + dt*b[i]*lop.ki[i]
+tf = t0 + dt
+
+# error
+u_ex = get_free_dof_values( interpolate_everywhere(u(tf),U(tf)))
+println(uf)
+println(u_ex)
+println(abs(sum(uf-u_ex)))
+
+# prepare next time iteration
+u0 = copy(u_ex)
+t0 = tf
+ki = [similar(u0)]
+M = allocate_jacobian(op,0.0,uh0,nothing)
+get_mass_matrix!(M,odeop,t0,u0,ode_cache)
+
+lop = DAERKStageOperator(odeop,t0,dt,u0,ode_cache,vi,ki,0,a,M)
+
+uf = similar(u0)
+ls = LUSolver()
+l_cache = nothing
