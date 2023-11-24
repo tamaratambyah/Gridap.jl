@@ -13,6 +13,8 @@ using LinearAlgebra
 include("DAE_transient_operator.jl")
 include("transient_jacobians.jl")
 include("DAERKStageOperator.jl")
+include("DiagnosticFEOperatorFromWeakForm.jl")
+include("diagnostic_operator.jl")
 
 k = 4.0
 
@@ -53,6 +55,10 @@ uop = AffineFEOperator(q,l,U(0.0),V)
 uh0 = solve(uop)
 u0 = get_free_dof_values(uh0)
 
+solve!(uh0,LinearFESolver(),uop)
+
+
+
 q(kk,v) = ∫(kk*v)dΩ
 l(v) = ∫( k*v )dΩ
 kop = AffineFEOperator(q,l,R,W)
@@ -67,179 +73,51 @@ function rhs(t,u,v,k)
 end
 
 
-""" DIAGNOSTIC FE OPERATOR """
+
+using Gridap.FESpaces
+import Gridap.FESpaces: FEOperatorFromWeakForm
+import Gridap.FESpaces: get_test
+import Gridap.FESpaces: get_trial
+import Gridap.FESpaces: collect_cell_vector
+import Gridap.Algebra: allocate_vector
 
 
 
-# using Gridap.FESpaces
-# import Gridap.FESpaces: FEOperatorFromWeakForm
-# import Gridap.FESpaces: get_test
-# import Gridap.FESpaces: get_trial
-# import Gridap.FESpaces: collect_cell_vector
-# import Gridap.Algebra: allocate_vector
-
-# """ Allowing for prognostic input """
+### FROM FEOPERATORS.jl
+import Gridap.FESpaces: AlgebraicOpFromFEOp
 
 
-# # mutable struct DiagnosticOperator <: NonlinearOperator
-# # end
 
 
-# ### FROM FEOPERATORS.jl
-# import Gridap.FESpaces: AlgebraicOpFromFEOp
-# function Gridap.FESpaces.allocate_residual(op::AlgebraicOpFromFEOp,x::AbstractVector)
+
+"""
+"""
+
+using LineSearches: BackTracking
+nls = NLSolver(
+  show_trace=true, method=:newton, linesearch=BackTracking())
+solver = FESolver(nls)
+
+### DIAGNOSTIC SOLVE
+res_k(kk,v,F) = ∫(kk*v)dΩ - ∫( k*v*F )dΩ
+jac_k(kk,dkk,v,F) = ∫( dkk*v )dΩ
+kop = DiagnosticFEOperator(res_k,jac_k,R,W)
+solve(kop)
+
+oopp = DiagOperator(kop)
+uf = similar(u0)
+solve!(uf,solver,oopp)
 
 
-#   trial = get_trial(op.feop)
-#   u = EvaluationFunction(trial,x)
 
-#   F = interpolate(20,R)
-#   # F = EvaluationFunction(trial,op.F)
-
-#   allocate_residual(op.feop,u,F)
+# function Gridap.FESPaces.solve!(u,solver::LinearFESolver,feop::DiagFEOperator,cache::Nothing)
+  x = get_free_dof_values(uh0)
+  op = get_algebraic_operator(oopp)
+  cache = solve!(x,solver,op)
+  trial = get_trial(feop)
+  u_new = FEFunction(trial,x)
+  (u_new, cache)
 # end
-
-# function Gridap.FESpaces.residual!(b::AbstractVector,op::AlgebraicOpFromFEOp,x::AbstractVector)
-#   trial = get_trial(op.feop)
-#   u = EvaluationFunction(trial,x)
-#   residual!(b,op.feop,u,F)
-# end
-
-# function Gridap.FESpaces.residual(op::AlgebraicOpFromFEOp,x::AbstractVector)
-#   F = interpolate(20,R)
-#   trial = get_trial(op.feop)
-#   u = EvaluationFunction(trial,x)
-#   residual(op.feop,u,F)
-# end
-
-# function Gridap.FESpaces.allocate_jacobian(op::AlgebraicOpFromFEOp,x::AbstractVector)
-#   F = interpolate(20,R)
-#   trial = get_trial(op.feop)
-#   u = EvaluationFunction(trial,x)
-#   allocate_jacobian(op.feop,u,F)
-# end
-
-# function Gridap.FESpaces.jacobian!(A::AbstractMatrix,op::AlgebraicOpFromFEOp,x::AbstractVector)
-#   F = interpolate(20,R)
-#   trial = get_trial(op.feop)
-#   u = EvaluationFunction(trial,x)
-#   jacobian!(A,op.feop,u,F)
-# end
-
-# function Gridap.FESpaces.jacobian(op::AlgebraicOpFromFEOp,x::AbstractVector)
-#   F = interpolate(20,R)
-#   trial = get_trial(op.feop)
-#   u = EvaluationFunction(trial,x)
-#   jacobian(op.feop,u,F)
-# end
-
-# function Gridap.FESpaces.residual_and_jacobian!(b::AbstractVector,A::AbstractMatrix,op::AlgebraicOpFromFEOp,x::AbstractVector)
-#   F = interpolate(20,R)
-#   trial = get_trial(op.feop)
-#   u = EvaluationFunction(trial,x)
-#   residual_and_jacobian!(b,A,op.feop,u,F)
-# end
-
-# function Gridap.FESpaces.residual_and_jacobian(op::AlgebraicOpFromFEOp,x::AbstractVector)
-#   F = interpolate(20,R)
-#   trial = get_trial(op.feop)
-#   u = EvaluationFunction(trial,x)
-#   residual_and_jacobian(op.feop,u,F)
-# end
-
-# #### FEOM FEOPERATORSFROMWEAKFORM.jl
-# mutable struct DiagnosticFEOperator <: FEOperator
-#   res::Function
-#   jac::Function
-#   trial::FESpace
-#   test::FESpace
-#   assem::Assembler
-# end
-
-# function DiagnosticFEOperator(
-#   res::Function,jac::Function,trial::FESpace,test::FESpace)
-#   assem = SparseMatrixAssembler(trial,test)
-#   DiagnosticFEOperator(res,jac,trial,test,assem)
-# end
-
-# get_test(feop::DiagnosticFEOperator) = feop.test
-
-# get_trial(feop::DiagnosticFEOperator) = feop.trial
-
-# get_matrix(feop::DiagnosticFEOperator) = get_matrix(feop.op)
-
-# get_vector(feop::DiagnosticFEOperator) = get_vector(feop.op)
-
-# get_algebraic_operator(feop::DiagnosticFEOperator) = feop.op
-
-# function allocate_residual(op::DiagnosticFEOperator,uh,F)
-#   V = get_test(op)
-#   v = get_fe_basis(V)
-#   vecdata = collect_cell_vector(V,op.res(uh,v,F))
-#   allocate_vector(op.assem, vecdata)
-# end
-
-# function residual!(b::AbstractVector,op::DiagnosticFEOperator,uh,F)
-#   V = get_test(op)
-#   v = get_fe_basis(V)
-#   vecdata = collect_cell_vector(V,op.res(uh,v,F))
-#   assemble_vector!(b,op.assem, vecdata)
-#   b
-# end
-
-# function allocate_jacobian(op::DiagnosticFEOperator,uh,F)
-#   U = get_trial(op)
-#   V = get_test(op)
-#   du = get_trial_fe_basis(U)
-#   v = get_fe_basis(V)
-#   matdata = collect_cell_matrix(U,V,op.jac(uh,du,v,F))
-#   allocate_matrix(op.assem, matdata)
-# end
-
-# function jacobian!(A::AbstractMatrix,op::DiagnosticFEOperator,uh,F)
-#   U = get_trial(op)
-#   V = get_test(op)
-#   du = get_trial_fe_basis(U)
-#   v = get_fe_basis(V)
-#   matdata = collect_cell_matrix(U,V,op.jac(uh,du,v,F))
-#   assemble_matrix!(A,op.assem,matdata)
-#   A
-# end
-
-# function residual_and_jacobian!(
-#   b::AbstractVector,A::AbstractMatrix,op::DiagnosticFEOperator,uh,F)
-#   U = get_trial(op)
-#   V = get_test(op)
-#   du = get_trial_fe_basis(U)
-#   v = get_fe_basis(V)
-#   data = collect_cell_matrix_and_vector(U,V,op.jac(uh,du,v,F),op.res(uh,v,F))
-#   assemble_matrix_and_vector!(A, b, op.assem, data)
-#   (b,A)
-# end
-
-# function residual_and_jacobian(op::DiagnosticFEOperator,uh,F)
-
-#   U = get_trial(op)
-#   V = get_test(op)
-#   du = get_trial_fe_basis(U)
-#   v = get_fe_basis(V)
-#   data = collect_cell_matrix_and_vector(U,V,op.jac(uh,du,v,F),op.res(uh,v,F))
-#   A, b = assemble_matrix_and_vector(op.assem, data)
-#   (b, A)
-# end
-
-
-
-# ### DIAGNOSTIC SOLVE
-# res_k(kk,v,F) = ∫(kk*v)dΩ - ∫( k*v*F )dΩ
-# jac_k(kk,dkk,v,F) = ∫( dkk*v )dΩ
-# kop = DiagnosticFEOperator(res_k,jac_k,R,W)
-
-# kFE = solve(kop)
-# println(get_free_dof_values(kFE))
-
-# get_trial(kop)
-
 
 """solve step"""
 
