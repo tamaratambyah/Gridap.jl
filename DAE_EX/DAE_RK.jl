@@ -14,7 +14,8 @@ include("DAE_transient_operator.jl")
 include("transient_jacobians.jl")
 include("DAERKStageOperator.jl")
 include("DiagnosticFEOperatorFromWeakForm.jl")
-include("diagnostic_operator.jl")
+include("DAEOperator.jl")
+# include("diagnostic_operator.jl")
 
 k = 4.0
 
@@ -98,15 +99,25 @@ nls = NLSolver(
   show_trace=true, method=:newton, linesearch=BackTracking())
 solver = FESolver(nls)
 
+
+function Gridap.FESpaces.solve!(uf,solver::NonlinearFESolver,feop::FEOperator,cache::Nothing)
+  x = copy(uf)
+  op = get_algebraic_operator(feop)
+  cache = solve!(x,solver.nls,op)
+  (x,cache)
+end
+
 ### DIAGNOSTIC SOLVE
 res_k(kk,v,F) = ∫(kk*v)dΩ - ∫( k*v*F )dΩ
 jac_k(kk,dkk,v,F) = ∫( dkk*v )dΩ
 kop = DiagnosticFEOperator(res_k,jac_k,R,W)
-solve(kop)
+dd=solve(kop)
 
-oopp = DiagOperator(kop)
-uf = similar(u0)
-solve!(uf,solver,oopp)
+println( get_free_dof_values(dd) )
+
+F = interpolate(20,R)
+uf = similar( get_free_dof_values( F) )
+solve!(uf,solver,kop,nothing)
 
 
 
