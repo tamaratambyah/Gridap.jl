@@ -51,6 +51,13 @@ function Gridap.FESpaces.residual!(b::AbstractVector,op::DiagnosticFEOperatorFro
   b
 end
 
+function Gridap.FESpaces.residual(op::DiagnosticFEOperatorFromWeakForm,uh,F)
+  V = get_test(op)
+  v = get_fe_basis(V)
+  vecdata = collect_cell_vector(V,op.res(uh,v,F))
+  assemble_vector(op.assem, vecdata)
+end
+
 function Gridap.FESpaces.allocate_jacobian(op::DiagnosticFEOperatorFromWeakForm,uh,F)
   U = get_trial(op)
   V = get_test(op)
@@ -68,6 +75,15 @@ function Gridap.FESpaces.jacobian!(A::AbstractMatrix,op::DiagnosticFEOperatorFro
   matdata = collect_cell_matrix(U,V,op.jac(uh,du,v,F))
   assemble_matrix!(A,op.assem,matdata)
   A
+end
+
+function Gridap.FESpaces.jacobian(op::DiagnosticFEOperatorFromWeakForm,uh,F)
+  U = get_trial(op)
+  V = get_test(op)
+  du = get_trial_fe_basis(U)
+  v = get_fe_basis(V)
+  matdata = collect_cell_matrix(U,V,op.jac(uh,du,v,F))
+  assemble_matrix(op.assem,matdata)
 end
 
 function Gridap.FESpaces.residual_and_jacobian!(
