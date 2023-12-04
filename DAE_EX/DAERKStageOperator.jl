@@ -29,6 +29,7 @@ mutable struct DAERKStageOperator <: RungeKuttaNonlinearOperator
   a::Matrix
   M::AbstractMatrix
   yh::AbstractVector
+  yspace::FESpace
 end
 
 function Gridap.Algebra.residual!(b::AbstractVector,
@@ -45,15 +46,11 @@ function Gridap.Algebra.residual!(b::AbstractVector,
    @. ui = ui  + op.dt * op.a[op.i,j] * op.ki[j]
   end
 
-
-  # q(kk,v) = ∫(kk*v)dΩ
-  # l(v) = ∫( k*v )dΩ
-  # kop = AffineFEOperator(q,l,R,W)
-  # kFE = solve(kop)
   yh = op.yh
+  yspace = op.yspace
 
   rhs = similar(op.u0)
-  DAE_rhs!(rhs,op.odeop,op.ti,(ui,vi),(yh,yh),op.ode_cache)
+  DAE_rhs!(rhs,op.odeop,op.ti,(ui,vi),(yh,yh),op.ode_cache,yspace)
 
   @. b = b + rhs
   @. b = -1.0 * b

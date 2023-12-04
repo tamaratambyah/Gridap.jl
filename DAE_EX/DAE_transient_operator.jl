@@ -98,7 +98,8 @@ function DAE_rhs!(
   t::Real,
   xhF::Tuple{Vararg{AbstractVector}}, # this input is tuple of dofs
   yhF::Tuple{Vararg{AbstractVector}}, # this input is tuple of dofs
-  ode_cache)
+  ode_cache,
+  yspace)
   Xh, = ode_cache   # trial space
   dxh = ()
   dyh = ()
@@ -107,7 +108,7 @@ function DAE_rhs!(
     dyh = (dyh...,EvaluationFunction(R,yhF[i]))  # force trial space for yh
   end
   xh=TransientCellField(EvaluationFunction(Xh[1],xhF[1]),dxh)
-  yh=TransientCellField(EvaluationFunction(R,yhF[1]),dyh) # force trial space for yh
+  yh=TransientCellField(EvaluationFunction(yspace,yhF[1]),dyh) # force trial space for yh
 
   DAE_rhs!(rhs,op.feop,t,xh,yh,ode_cache)
 end

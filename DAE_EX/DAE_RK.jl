@@ -113,7 +113,7 @@ feop = get_algebraic_operator(kop)
 
 
 
-
+y0 = copy(k0)
 
 ode_cache = allocate_cache(odeop)
 vi = similar(u0)
@@ -124,7 +124,7 @@ l_cache = nothing
 
 nl_cache = nothing
 
-lop = DAERKStageOperator(odeop,t0,dt,u0,ode_cache,vi,ki,0,a,M,k0)
+lop = DAERKStageOperator(odeop,t0,dt,u0,ode_cache,vi,ki,0,a,M,y0,R)
 nlop = AlgebraicDAEOpFromFEOp(feop.feop,F0,U(0.0))
 
 
