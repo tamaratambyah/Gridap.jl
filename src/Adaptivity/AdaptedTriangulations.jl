@@ -109,6 +109,7 @@ for (stype,ttype) in [(:AdaptedTriangulation,:AdaptedTriangulation),(:AdaptedTri
   tttrian = (ttype==:AdaptedTriangulation) ? :(ttrian.trian) : :(ttrian)
   @eval begin
     function CellData.is_change_possible(strian::$stype,ttrian::$ttype)
+      println("my fork")
       (strian === ttrian) && (return true)
 
       if (get_background_model(strian) === get_background_model(ttrian))
@@ -116,7 +117,7 @@ for (stype,ttype) in [(:AdaptedTriangulation,:AdaptedTriangulation),(:AdaptedTri
       end
 
       strian_is_cell_wise = (num_cell_dims(strian) == num_point_dims(strian))
-      trians_are_related  = is_related(strian,ttrian)
+      trians_are_related  = true #is_related(strian,ttrian)
       return trians_are_related
     end
   end
