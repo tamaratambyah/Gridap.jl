@@ -262,7 +262,7 @@ function change_domain_o2n(f_coarse,ctrian::Triangulation{Dc},ftrian::AdaptedTri
   cglue = get_glue(ctrian,Val(Dc))
   fglue = get_glue(ftrian,Val(Dc))
 
-  @notimplementedif num_point_dims(ctrian) != Dc
+  #@notimplementedif num_point_dims(ctrian) != Dc
   @notimplementedif isa(fglue,Nothing)
 
   if (num_cells(ctrian) != 0)
